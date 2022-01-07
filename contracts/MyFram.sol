@@ -15,6 +15,12 @@ contract MyFram is BaseUpgradeable {
     uint8 constant fieldCount = 16;
     uint256 constant fieldPrice = 1 << 17;
     uint256 constant fieldUpgradePriceRate = 1 << 17;
+    uint256 constant fieldhighestLevel = 3;
+    uint256 constant fieldRipePeriodRate = 15;
+    uint256[12] seedIds = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12];
+
+    // 种子等级对应关系
+    mapping(uint => uint) public seedIdGradeMapping;
 
     // 收益地址
     address public earnings;
@@ -56,16 +62,14 @@ contract MyFram is BaseUpgradeable {
      * 购买所有未购买的土地（原生币）
      */
     function buyAllFieldByETH() public payable initField {
-        uint256 amount = _addAllField();
-        _refundExcessETH(amount);
+        _buyAllFieldByETH();
     }
 
     /**
      * 购买所有未购买的土地（代币）
      */
     function buyAllFieldByMyToken() public initField {
-        uint256 amount = _addAllField();
-        _settlementMyToken(amount);
+        _buyAllFieldByMyToken();
     }
 
     /**
@@ -87,20 +91,68 @@ contract MyFram is BaseUpgradeable {
     /**
      * 升级所有土地
      */
-    function fieldAllUpgradeByETH() public payable {}
+    function fieldAllUpgradeByETH() public payable {
+        // 先购买
+        _buyAllFieldByETH();
+        uint256 amount = _fieldAllUpgrade();
+        _refundExcessETH(amount);
+    }
 
     /**
      * 升级所有土地（代币）
      */
-    function fieldAllUpgradeByMyToken() public {}
+    function fieldAllUpgradeByMyToken() public {
+        // 先购买
+        _buyAllFieldByMyToken();
+        uint256 amount = _fieldAllUpgrade();
+        _settlementMyToken(amount);
+    }
+
+    /**
+     * 获取升级所有土地需要的金额
+     */
+    function _fieldAllUpgrade() private view returns (uint256) {
+        Field[] memory fields = fieldOf[msg.sender];
+        uint256 amount;
+        for (uint256 i = 0; i < fields.length; i++) {
+            for (uint256 j = fields[i].grade + 1; j <= fieldhighestLevel; j++) {
+                amount += fieldUpgradePriceRate * fields[i].grade;
+            }
+            fields[i].grade = fieldhighestLevel;
+            // 例如 ripePeriod = 24; 计算  ripePeriod =ripePeriod - ripePeriod * 15/100 * 2 => ripePeriod = 24 - 24*30/100 => ripePeriod = 17;
+            fields[i].ripePeriod =
+                fields[i].ripePeriod -
+                fields[i].ripePeriod *
+                (fieldRipePeriodRate / 100) *
+                (fieldhighestLevel - 1);
+        }
+        return amount;
+    }
+
+    /**
+     * 购买所有未购买的土地（原生币）
+     */
+    function _buyAllFieldByETH() private {
+        uint256 amount = _addAllField();
+        _refundExcessETH(amount);
+    }
+
+    /**
+     * 购买所有未购买的土地（代币）
+     */
+    function _buyAllFieldByMyToken() private {
+        uint256 amount = _addAllField();
+        _settlementMyToken(amount);
+    }
 
     /**
      * 获取升级土地需要的金额
      * @return 金额
      */
     function _fieldUpgrade(uint256 _index) private view returns (uint256) {
-        require(_index + 1 <= fieldOf[msg.sender].length, "no index !");
+        require(_index + 1 <= fieldOf[msg.sender].length, "no index!");
         Field memory filed = fieldOf[msg.sender][_index];
+        require(filed.grade <= fieldhighestLevel, "beyond grade limit!");
         uint256 grade = filed.grade;
         uint256 amount = (grade + 1) * fieldUpgradePriceRate;
         return amount;
@@ -144,4 +196,5 @@ contract MyFram is BaseUpgradeable {
         require(msg.value >= _amount, "no enough payfor!");
         IERC20Upgradeable(myToken).transferFrom(msg.sender, earnings, _amount);
     }
+
 }
