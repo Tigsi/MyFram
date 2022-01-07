@@ -16,8 +16,9 @@ contract MyFram is BaseUpgradeable {
     uint256 constant fieldPrice = 1 << 17; // 土地单价
     uint256 constant fieldUpgradePriceRate = 1 << 17; // 土地价格随等级增加
     uint256 constant fieldhighestGrade = 3; // 土地最高等级
-    uint256 constant fieldRipePeriodRate = 15; // 土地成熟周期随等级增加
+    uint256 constant fieldRipePeriodReduceRate = 15; // 土地成熟周期随等级减少（百分比）
     uint256 constant seedhighestGrade = 3; // 种子等级
+    uint256 constant seedRipePeriodGradeIncreaseHours = 24; // 成熟周期种子随等级增加
 
     // 种子列表
     uint256[12] seedIds = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12];
@@ -36,6 +37,18 @@ contract MyFram is BaseUpgradeable {
         if (0 == fieldOf[msg.sender].length) {
             _addField();
         }
+        _;
+    }
+
+    modifier canPlant(uint256 _seedId, uint256 _index) {
+        // 存在 _index 对应的土地
+        require(fieldOf[msg.sender].length > _index);
+        // 种子等级大于等于土地
+        require(
+            seedIdGradeMapping[_seedId] >= fieldOf[msg.sender][_index].grade
+        );
+        // 土地尚未播种
+        require(fieldOf[msg.sender][_index].sowTime == 0);
         _;
     }
 
@@ -113,22 +126,43 @@ contract MyFram is BaseUpgradeable {
     }
 
     /**
+     * 种植
+     */
+    function plant(uint256 _seedId, uint256 _index)
+        public
+        canPlant(_seedId, _index)
+    {
+        // 设置种植时间
+        fieldOf[msg.sender][_index].sowTime = block.timestamp;
+        // 计算成熟周期
+        // 例如 ripePeriod = 24; 计算  ripePeriod =ripePeriod - ripePeriod * 15/100 * 2 => ripePeriod = 24 - 24*30/100 => ripePeriod = 17;
+        uint256 _ripePeriod = seedRipePeriodGradeIncreaseHours *
+            seedIdGradeMapping[_seedId];
+        fieldOf[msg.sender][_index].ripePeriod =
+            _ripePeriod -
+            _ripePeriod *
+            (fieldRipePeriodReduceRate / 100) *
+            (fieldOf[msg.sender][_index].grade - 1);
+    }
+
+    /**
+     * 一键种植
+     */
+     function plantAll() public{
+         
+     }
+
+    /**
      * 获取升级所有土地需要的金额
      */
-    function _fieldAllUpgrade() private view returns (uint256) {
+    function _fieldAllUpgrade() private returns (uint256) {
         Field[] memory fields = fieldOf[msg.sender];
         uint256 amount;
         for (uint256 i = 0; i < fields.length; i++) {
             for (uint256 j = fields[i].grade + 1; j <= fieldhighestGrade; j++) {
                 amount += fieldUpgradePriceRate * fields[i].grade;
             }
-            fields[i].grade = fieldhighestGrade;
-            // 例如 ripePeriod = 24; 计算  ripePeriod =ripePeriod - ripePeriod * 15/100 * 2 => ripePeriod = 24 - 24*30/100 => ripePeriod = 17;
-            fields[i].ripePeriod =
-                fields[i].ripePeriod -
-                fields[i].ripePeriod *
-                (fieldRipePeriodRate / 100) *
-                (fieldhighestGrade - 1);
+            fieldOf[msg.sender][i].grade = fieldhighestGrade;
         }
         return amount;
     }
