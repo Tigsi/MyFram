@@ -11,16 +11,19 @@ contract MyFram is BaseUpgradeable {
         uint256 sowTime; // 播种时间
     }
 
-    uint8 constant fieldInitialGrade = 1;
-    uint8 constant fieldCount = 16;
-    uint256 constant fieldPrice = 1 << 17;
-    uint256 constant fieldUpgradePriceRate = 1 << 17;
-    uint256 constant fieldhighestLevel = 3;
-    uint256 constant fieldRipePeriodRate = 15;
+    uint8 constant fieldInitialGrade = 1; // 土地初始化等级
+    uint8 constant fieldCount = 16; // 土地块数
+    uint256 constant fieldPrice = 1 << 17; // 土地单价
+    uint256 constant fieldUpgradePriceRate = 1 << 17; // 土地价格随等级增加
+    uint256 constant fieldhighestGrade = 3; // 土地最高等级
+    uint256 constant fieldRipePeriodRate = 15; // 土地成熟周期随等级增加
+    uint256 constant seedhighestGrade = 3; // 种子等级
+
+    // 种子列表
     uint256[12] seedIds = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12];
 
     // 种子等级对应关系
-    mapping(uint => uint) public seedIdGradeMapping;
+    mapping(uint256 => uint256) public seedIdGradeMapping;
 
     // 收益地址
     address public earnings;
@@ -42,6 +45,7 @@ contract MyFram is BaseUpgradeable {
     function initialize(address _myToken) public initializer {
         BaseUpgradeable.__Base_init();
         myToken = _myToken;
+        _initSeeds();
     }
 
     /**
@@ -115,16 +119,16 @@ contract MyFram is BaseUpgradeable {
         Field[] memory fields = fieldOf[msg.sender];
         uint256 amount;
         for (uint256 i = 0; i < fields.length; i++) {
-            for (uint256 j = fields[i].grade + 1; j <= fieldhighestLevel; j++) {
+            for (uint256 j = fields[i].grade + 1; j <= fieldhighestGrade; j++) {
                 amount += fieldUpgradePriceRate * fields[i].grade;
             }
-            fields[i].grade = fieldhighestLevel;
+            fields[i].grade = fieldhighestGrade;
             // 例如 ripePeriod = 24; 计算  ripePeriod =ripePeriod - ripePeriod * 15/100 * 2 => ripePeriod = 24 - 24*30/100 => ripePeriod = 17;
             fields[i].ripePeriod =
                 fields[i].ripePeriod -
                 fields[i].ripePeriod *
                 (fieldRipePeriodRate / 100) *
-                (fieldhighestLevel - 1);
+                (fieldhighestGrade - 1);
         }
         return amount;
     }
@@ -152,7 +156,7 @@ contract MyFram is BaseUpgradeable {
     function _fieldUpgrade(uint256 _index) private view returns (uint256) {
         require(_index + 1 <= fieldOf[msg.sender].length, "no index!");
         Field memory filed = fieldOf[msg.sender][_index];
-        require(filed.grade <= fieldhighestLevel, "beyond grade limit!");
+        require(filed.grade <= fieldhighestGrade, "beyond grade limit!");
         uint256 grade = filed.grade;
         uint256 amount = (grade + 1) * fieldUpgradePriceRate;
         return amount;
@@ -197,4 +201,12 @@ contract MyFram is BaseUpgradeable {
         IERC20Upgradeable(myToken).transferFrom(msg.sender, earnings, _amount);
     }
 
+    /**
+     * 初始化种子和等级关系
+     */
+    function _initSeeds() private {
+        for (uint256 i = 0; i < seedIds.length; i++) {
+            seedIdGradeMapping[seedIds[i]] = (i + 1) % (seedhighestGrade + 1);
+        }
+    }
 }
