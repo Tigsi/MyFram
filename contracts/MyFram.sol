@@ -407,5 +407,3 @@ contract MyFram {
         firuitOf[msg.sender].push(fruit);
     }
 }
-
-// 哈哈test
