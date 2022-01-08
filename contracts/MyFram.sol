@@ -9,6 +9,7 @@ contract MyFram {
         uint256 seedId; // 种子编号
         uint256 ripePeriod; // 成熟周期
         uint256 sowTime; // 播种时间
+        uint256 ripeAddition; // 成熟速度加成
     }
 
     // 果实
@@ -22,10 +23,13 @@ contract MyFram {
     uint8 constant fieldCount = 16; // 土地块数
     uint256 constant fieldPrice = 0.1 ether; // 土地单价
     uint256 constant fieldUpgradePriceRate = 0.1 ether; // 土地价格随等级增加
+    uint256 constant speedUpOnecNeedPrice = 0.1 ether; // 加速一次单价
+    uint256 constant speedUpOnecNeedHours = 12 hours; // 加速一减少时间
+    uint256 constant fruitGradeOneDiffPrice = 0.1 ether; // 果实一级的价格差值
     uint256 constant fieldhighestGrade = 3; // 土地最高等级
     uint256 constant fieldRipePeriodReduceRate = 15; // 土地成熟周期随等级减少（百分比）
     uint256 constant seedhighestGrade = 3; // 种子等级
-    uint256 constant seedRipePeriodGradeIncreaseHours = 24; // 成熟周期种子随等级增加
+    uint256 constant seedRipePeriodGradeIncreaseHours = 24 hours; // 成熟周期种子随等级增加
 
     // 种子列表
     uint256[12] seedIds = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12];
@@ -41,6 +45,8 @@ contract MyFram {
     address private owner;
     // 玩家地址对应的土地
     mapping(address => Field[]) public fieldOf;
+    // 玩家地址对应的果实
+    mapping(address => Fruit[]) public firuitOf;
     /// 初始化土地
     modifier initField() {
         if (0 == fieldOf[msg.sender].length) {
@@ -63,6 +69,18 @@ contract MyFram {
         );
         // 土地尚未播种
         require(fieldOf[msg.sender][_index].sowTime == 0);
+        _;
+    }
+
+    modifier canBuyField() {
+        require(fieldOf[msg.sender].length + 1 <= fieldCount, "complete buy!");
+        _;
+    }
+
+    modifier canSpeedUp(uint256 _index) {
+        require(fieldOf[msg.sender].length > _index);
+        // 确保土地已经播种
+        require(fieldOf[msg.sender][_index].sowTime != 0, "no so!");
         _;
     }
 
@@ -92,18 +110,18 @@ contract MyFram {
     /**
      * 购买所有未购买的土地（原生币）
      */
-    function buyAllFieldByETH() public payable initField {
+    function buyAllFieldByETH() public payable initField canBuyField {
         _buyAllFieldByETH();
     }
 
-    function buyOneFieldByETH() public payable initField {
+    function buyOneFieldByETH() public payable initField canBuyField{
         _buyOneFieldByETH();
     }
 
     /**
      * 购买所有未购买的土地（代币）
      */
-    function buyAllFieldByMyToken() public initField {
+    function buyAllFieldByMyToken() public initField canBuyField{
         _buyAllFieldByMyToken();
     }
 
@@ -148,24 +166,26 @@ contract MyFram {
         public
         canPlant(_seedId, _index)
     {
-        // 设置种植时间
-        fieldOf[msg.sender][_index].sowTime = block.timestamp;
-        // 计算成熟周期
-        // 例如 ripePeriod = 24; 计算  ripePeriod =ripePeriod - ripePeriod * 15/100 * 2 => ripePeriod = 24 - 24*30/100 => ripePeriod = 17;
-        uint256 _ripePeriod = seedRipePeriodGradeIncreaseHours *
-            seedIdGradeMapping[_seedId];
-        fieldOf[msg.sender][_index].ripePeriod =
-            _ripePeriod -
-            (_ripePeriod *
-                fieldRipePeriodReduceRate *
-                (fieldOf[msg.sender][_index].grade - 1)) /
-            100;
+        _plant(_seedId, _index);
     }
 
     /**
      * 一键种植
      */
-    function plantAll() public {}
+    function plantAll(uint256[] memory _seedIds) public {
+        for (uint256 i = 0; i < _seedIds.length; i++) {
+            for (uint256 j = 0; j < fieldOf[msg.sender].length; j++) {
+                // 没有种植和符合等级
+                if (
+                    fieldOf[msg.sender][j].sowTime == 0 &&
+                    fieldOf[msg.sender][j].grade ==
+                    seedIdGradeMapping[_seedIds[i]]
+                ) {
+                    _plant(_seedIds[i], j);
+                }
+            }
+        }
+    }
 
     /**
      * 卖出果实
@@ -180,17 +200,62 @@ contract MyFram {
     /**
      * 加速
      */
-    function speedUp(uint256 _index) public {}
+    function speedUpOneByETH(uint256 _index) public payable canSpeedUp(_index) {
+        require(msg.value >= speedUpOnecNeedPrice, "no enough payfor!");
+        Field memory field = fieldOf[msg.sender][_index];
+        uint256 diff = block.timestamp - field.sowTime;
+        require(diff+field.ripeAddition <  field.ripePeriod,"no need speed!");
+        fieldOf[msg.sender][_index].ripeAddition =
+            fieldOf[msg.sender][_index].ripeAddition +
+            speedUpOnecNeedHours;
+        _refundExcessETH(speedUpOnecNeedPrice);
+    }
 
     /**
      * 一键加速
      */
-    function speedUpAll() public {}
+    function speedUpAll() public payable {
+        uint256 _amount;
+        Field[] memory fields = fieldOf[msg.sender];
+        for (uint256 i = 0; i < fields.length; i++) {
+            Field memory field = fields[i];
+            if (field.sowTime != 0) {
+                uint256 diff = block.timestamp - field.sowTime;
+                uint256 speedTimes = (field.ripePeriod - diff) /
+                    speedUpOnecNeedHours;
+                if ((field.ripePeriod - diff) % speedUpOnecNeedHours != 0) {
+                    speedTimes++;
+                }
+                fieldOf[msg.sender][i].ripeAddition =
+                    speedTimes *
+                    speedUpOnecNeedHours;
+                _amount += speedTimes * speedUpOnecNeedPrice;
+            }
+        }
+        _refundExcessETH(_amount);
+    }
 
     /**
-    * 收获
+     * 收获
      */
-    function harvestAll() public{}
+    function harvestAll() public {
+        Field[] memory fields = fieldOf[msg.sender];
+        bool ripe;
+        for (uint256 i = 0; i < fields.length; i++) {
+            Field memory field = fields[i];
+            uint256 diff = block.timestamp - field.sowTime;
+            if (diff+field.ripeAddition >=  field.ripePeriod) {
+                ripe = true;
+                _addFruit(
+                    seedIdGradeMapping[field.seedId],
+                    field.grade,
+                    fruitGradeOneDiffPrice * field.grade
+                );
+                _initNoBaseField(i);
+            }
+        }
+        require(ripe, "no ripe!");
+    }
 
     /**
      * 获取升级所有土地需要的金额
@@ -298,5 +363,47 @@ contract MyFram {
         for (uint256 i = 0; i < seedIds.length; i++) {
             seedIdGradeMapping[seedIds[i]] = (i % seedhighestGrade) + 1;
         }
+    }
+
+    function _plant(uint256 _seedId, uint256 _index) private {
+        // 设置种植时间
+        fieldOf[msg.sender][_index].sowTime = block.timestamp;
+        // 计算成熟周期
+        // 例如 ripePeriod = 24; 计算  ripePeriod =ripePeriod - ripePeriod * 15/100 * 2 => ripePeriod = 24 - 24*30/100 => ripePeriod = 17;
+        uint256 _ripePeriod = seedRipePeriodGradeIncreaseHours *
+            seedIdGradeMapping[_seedId];
+        fieldOf[msg.sender][_index].ripePeriod =
+            _ripePeriod -
+            (_ripePeriod *
+                fieldRipePeriodReduceRate *
+                (fieldOf[msg.sender][_index].grade - 1)) /
+            100;
+
+        fieldOf[msg.sender][_index].seedId = _seedId;
+    }
+
+    /**
+     * 初始化土地
+     */
+    function _initNoBaseField(uint256 _index) private {
+        fieldOf[msg.sender][_index].seedId = 0;
+        fieldOf[msg.sender][_index].ripePeriod = 0;
+        fieldOf[msg.sender][_index].sowTime = 0;
+        fieldOf[msg.sender][_index].ripeAddition = 0;
+    }
+
+    /**
+     * 添加果实
+     */
+    function _addFruit(
+        uint256 _seedId,
+        uint256 _grade,
+        uint256 _pirce
+    ) private {
+        Fruit memory fruit;
+        fruit.grade = _grade;
+        fruit.pirce = _pirce;
+        fruit.seedId = _seedId;
+        firuitOf[msg.sender].push(fruit);
     }
 }
