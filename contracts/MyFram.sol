@@ -1,9 +1,9 @@
 // SPDX-License-Identifier: MITls
 pragma solidity ^0.8.0;
-import "./common/BaseUpgradeable.sol";
-import "@openzeppelin/contracts-upgradeable/token/ERC20/IERC20Upgradeable.sol";
+import "@openzeppelin/contracts-upgradeable/token/ERC20/utils/SafeERC20Upgradeable.sol";
 
-contract MyFram is BaseUpgradeable {
+contract MyFram {
+    // 土地
     struct Field {
         uint256 grade; // 土地等级
         uint256 seedId; // 种子编号
@@ -11,10 +11,17 @@ contract MyFram is BaseUpgradeable {
         uint256 sowTime; // 播种时间
     }
 
+    // 果实
+    struct Fruit {
+        uint256 seedId; // 种子编号
+        uint256 grade; // 等级
+        uint256 pirce; // 价格
+    }
+
     uint8 constant fieldInitialGrade = 1; // 土地初始化等级
     uint8 constant fieldCount = 16; // 土地块数
-    uint256 constant fieldPrice = 1 << 17; // 土地单价
-    uint256 constant fieldUpgradePriceRate = 1 << 17; // 土地价格随等级增加
+    uint256 constant fieldPrice = 0.1 ether; // 土地单价
+    uint256 constant fieldUpgradePriceRate = 0.1 ether; // 土地价格随等级增加
     uint256 constant fieldhighestGrade = 3; // 土地最高等级
     uint256 constant fieldRipePeriodReduceRate = 15; // 土地成熟周期随等级减少（百分比）
     uint256 constant seedhighestGrade = 3; // 种子等级
@@ -30,13 +37,20 @@ contract MyFram is BaseUpgradeable {
     address public earnings;
     // 代币地址
     address public myToken;
+    // 合约拥有者
+    address private owner;
     // 玩家地址对应的土地
     mapping(address => Field[]) public fieldOf;
-    // 初始化土地
+    /// 初始化土地
     modifier initField() {
         if (0 == fieldOf[msg.sender].length) {
             _addField();
         }
+        _;
+    }
+    /// 是否是合约的拥有者
+    modifier isOwner() {
+        require(msg.sender == owner, "Caller is not owner");
         _;
     }
 
@@ -55,23 +69,23 @@ contract MyFram is BaseUpgradeable {
     /**
      * 初始化函数
      */
-    function initialize(address _myToken) public initializer {
-        BaseUpgradeable.__Base_init();
+    constructor(address _myToken) {
         myToken = _myToken;
+        owner = msg.sender;
         _initSeeds();
     }
 
     /**
      * 设置代币地址
      */
-    function setMyToken(address _myToken) public onlyAdmin {
+    function setMyToken(address _myToken) public isOwner {
         myToken = _myToken;
     }
 
     /**
      * 设置收益地址
      */
-    function setEarnings(address _earnings) public onlyAdmin {
+    function setEarnings(address _earnings) public isOwner {
         earnings = _earnings;
     }
 
@@ -80,6 +94,10 @@ contract MyFram is BaseUpgradeable {
      */
     function buyAllFieldByETH() public payable initField {
         _buyAllFieldByETH();
+    }
+
+    function buyOneFieldByETH() public payable initField {
+        _buyOneFieldByETH();
     }
 
     /**
@@ -109,8 +127,6 @@ contract MyFram is BaseUpgradeable {
      * 升级所有土地
      */
     function fieldAllUpgradeByETH() public payable {
-        // 先购买
-        _buyAllFieldByETH();
         uint256 amount = _fieldAllUpgrade();
         _refundExcessETH(amount);
     }
@@ -119,10 +135,10 @@ contract MyFram is BaseUpgradeable {
      * 升级所有土地（代币）
      */
     function fieldAllUpgradeByMyToken() public {
-        // 先购买
-        _buyAllFieldByMyToken();
         uint256 amount = _fieldAllUpgrade();
-        _settlementMyToken(amount);
+        if (amount != 0) {
+            _settlementMyToken(amount);
+        }
     }
 
     /**
@@ -140,17 +156,41 @@ contract MyFram is BaseUpgradeable {
             seedIdGradeMapping[_seedId];
         fieldOf[msg.sender][_index].ripePeriod =
             _ripePeriod -
-            _ripePeriod *
-            (fieldRipePeriodReduceRate / 100) *
-            (fieldOf[msg.sender][_index].grade - 1);
+            (_ripePeriod *
+                fieldRipePeriodReduceRate *
+                (fieldOf[msg.sender][_index].grade - 1)) /
+            100;
     }
 
     /**
      * 一键种植
      */
-     function plantAll() public{
-         
-     }
+    function plantAll() public {}
+
+    /**
+     * 卖出果实
+     */
+    function saleOne(uint256 _index) public {}
+
+    /**
+     * 一键卖出
+     */
+    function saleAll(uint256 _index) public {}
+
+    /**
+     * 加速
+     */
+    function speedUp(uint256 _index) public {}
+
+    /**
+     * 一键加速
+     */
+    function speedUpAll() public {}
+
+    /**
+    * 收获
+     */
+    function harvestAll() public{}
 
     /**
      * 获取升级所有土地需要的金额
@@ -176,11 +216,27 @@ contract MyFram is BaseUpgradeable {
     }
 
     /**
+     * 购买一块土地（原生币）
+     */
+    function _buyOneFieldByETH() private {
+        _addField();
+        _refundExcessETH(fieldPrice);
+    }
+
+    /**
      * 购买所有未购买的土地（代币）
      */
     function _buyAllFieldByMyToken() private {
         uint256 amount = _addAllField();
         _settlementMyToken(amount);
+    }
+
+    /**
+     * 购买一块土地（代币）
+     */
+    function _buyOneFieldByMyToken() private {
+        _addField();
+        _settlementMyToken(fieldPrice);
     }
 
     /**
@@ -210,7 +266,7 @@ contract MyFram is BaseUpgradeable {
      */
     function _addAllField() private returns (uint256) {
         uint256 fieldOfCount = fieldOf[msg.sender].length;
-        uint256 amount = fieldCount * fieldPrice;
+        uint256 amount = (fieldCount - fieldOfCount) * fieldPrice;
         for (uint256 i = fieldOfCount; i < fieldCount; i++) {
             _addField();
         }
@@ -240,7 +296,7 @@ contract MyFram is BaseUpgradeable {
      */
     function _initSeeds() private {
         for (uint256 i = 0; i < seedIds.length; i++) {
-            seedIdGradeMapping[seedIds[i]] = (i + 1) % (seedhighestGrade + 1);
+            seedIdGradeMapping[seedIds[i]] = (i % seedhighestGrade) + 1;
         }
     }
 }
